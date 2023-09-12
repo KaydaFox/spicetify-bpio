@@ -1,4 +1,8 @@
-import { ButtplugClient, ButtplugClientDevice } from "buttplug";
+import {
+  ButtplugClient,
+  ButtplugClientDevice,
+  ButtplugDeviceError,
+} from "buttplug";
 import { ButtplugBrowserWebsocketClientConnector } from "buttplug";
 import { SettingsSection } from "spcr-settings";
 
@@ -7,6 +11,7 @@ let connecter: ButtplugBrowserWebsocketClientConnector;
 let client: ButtplugClient | null;
 let currentTrack: trackData | null = null;
 let currentToyStrength: number = 0;
+let shouldNotVibrate: boolean = true;
 
 export default async function main() {
   console.log("loading...");
@@ -34,6 +39,24 @@ function addSettings() {
     "disconnect",
     handleDisconnection
   );
+  settings.addButton(
+    "bpio.test",
+    "test vibration on all devices",
+    "test",
+    async () => {
+      if (!client || !client.connected)
+        return Spicetify.showNotification(
+          "You're not connected to intiface",
+          true
+        );
+
+      client.devices.forEach(async (device) => {
+        await device.vibrate(0.5);
+        await sleep(1000);
+        return device.stop();
+      });
+    }
+  );
   settings.pushSettings();
 }
 
@@ -56,12 +79,23 @@ async function handleConnection(isAutoConnect?: boolean) {
     if (!client) client = new ButtplugClient("Spicetify");
 
     client.addListener("deviceadded", async (device: ButtplugClientDevice) => {
-      // Spicetify.showNotification(
-      //   `Device connected: ${device.name} ${
-      //     device.hasBattery &&
-      //     `with a battery level of ${(await device.battery()) * 100}%`
-      //   }. Total devices: ${client?.devices.length}`
-      // );
+      Spicetify.showNotification(
+        `Device connected: ${device.name} ${
+          device.hasBattery &&
+          `with a battery level of ${(await device.battery()) * 100}%`
+        }. Total devices: ${client?.devices.length}`
+      );
+
+      try {
+        await device.vibrate(0.1);
+        await new Promise((r) => setTimeout(r, 500));
+        await device.stop();
+      } catch (error) {
+        console.log(error);
+        if (error instanceof ButtplugDeviceError) {
+          console.log("got a device error!");
+        }
+      }
     });
 
     client.addListener(
@@ -78,6 +112,17 @@ async function handleConnection(isAutoConnect?: boolean) {
     // Spicetify.showNotification("Connected to intiface");
 
     Spicetify.Player.addEventListener("songchange", handleVibration);
+    Spicetify.Player.addEventListener("onplaypause", async () => {
+      shouldNotVibrate = Spicetify.Player.data.isPaused;
+      if (shouldNotVibrate) {
+        // await client?.devices[0].stop();
+        console.log("Pause for me daddy");
+        currentToyStrength = 0;
+      } else {
+        console.log("Play for me uwu");
+        updateLoop();
+      }
+    });
 
     handleVibration();
   } catch (error) {
@@ -100,16 +145,21 @@ setInterval(updateLoop, 100);
 
 async function updateLoop() {
   let totalBeatDuration: number = 0;
+
+  if (!Spicetify.Player || shouldNotVibrate) return;
+
   const trackDuration = Spicetify.Player.getProgress();
 
   for (let i = 0; i < (currentTrack?.beats.length || 0); i++) {
     const beat = currentTrack?.beats[i];
 
     totalBeatDuration += beat?.duration!;
-    if (totalBeatDuration > trackDuration) {
+    if (totalBeatDuration / 1000 > trackDuration) {
       let newToyStrength = beat?.confidence!;
       if (newToyStrength !== currentToyStrength) {
-        await client?.devices[0].vibrate(beat?.confidence as number);
+        currentToyStrength = newToyStrength;
+        // await client?.devices[0].vibrate(beat?.confidence as number);
+        console.log(currentToyStrength);
       }
       break;
     }
