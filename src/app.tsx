@@ -14,6 +14,7 @@ let client: ButtplugClient | null;
 let currentTrack: SpotifyAudioAnalysis | null = null;
 let currentToyStrength: number = 0;
 let shouldNotVibrate: boolean = false;
+let updateIntervalId: NodeJS.Timeout | null = null;
 
 export default async function main() {
   addSettings();
@@ -21,20 +22,51 @@ export default async function main() {
   handleConnection(true);
 }
 
+function createInterval() {
+  updateIntervalId = setInterval(
+    updateLoop,
+    settings.getFieldValue("bpio.update-interval")
+  );
+}
+
 function addSettings() {
-  settings.addToggle("bpio.ws-enable", "Enable plugin", false);
+  settings.addToggle("bpio.enable", "Enable plugin", false, () => {
+    if (client && client.connected) handleDisconnection;
+  });
   settings.addToggle(
     "bpio.autoconnect",
     "Autoconnect to intiface on spotify start",
     true
   );
-  settings.addInput("bpio.ws-url", "The url of the intiface server", "");
-  settings.addButton(
-    "bpio.connect",
-    "Connect to intiface",
-    "Connect",
-    handleConnection
+  settings.addInput(
+    "bpio.ws-url",
+    "The url of the intiface server",
+    "ws://localhost:12345"
   );
+  settings.addInput(
+    "bpio.max-intensity",
+    "Max intensity that the vibration can reach (applies to all devices) (default: 70; 0-100)",
+    "70"
+  );
+  settings.addInput(
+    "bpio.aplitudeDiff",
+    "Difference needed to trigger toy update change. Can send a lot of unneeded events if too low (default: 0.4)",
+    "0.4"
+  );
+  settings.addInput(
+    "bpio.update-interval",
+    "WARNING: changing may cause issues or add high delay (default: 75), value is in milliseconds",
+    "75",
+    () => {
+      if (updateIntervalId) {
+        clearInterval(updateIntervalId);
+        createInterval();
+      }
+    }
+  );
+  settings.addButton("bpio.connect", "Connect to intiface", "Connect", () => {
+    handleConnection(false);
+  });
   settings.addButton(
     "bpio.disconnect",
     "Disconnect from intiface",
@@ -63,14 +95,10 @@ function addSettings() {
 }
 
 async function handleConnection(isAutoConnect?: boolean) {
-  if (client && client.connected)
-    return Spicetify.showNotification(
-      "You are already connected to intiface, please disconnect first",
-      true
-    );
-  // if (!settings.getFieldValue("bpio-ws.enable")) return;
-  // if (isAutoConnect && !settings.getFieldValue("bpio.autoconnect")) return;
-  // I'll return back to those... they seem to break things rn lmaoo
+  if (client && client.connected) await handleDisconnection();
+
+  if (!settings.getFieldValue("bpio.enable")) return;
+  if (isAutoConnect && !settings.getFieldValue("bpio.autoconnect")) return;
 
   try {
     connecter = new ButtplugBrowserWebsocketClientConnector(
@@ -117,18 +145,14 @@ async function handleConnection(isAutoConnect?: boolean) {
       shouldNotVibrate = Spicetify.Player.data.isPaused;
       if (shouldNotVibrate) {
         await client?.devices[0].stop();
-        console.log("Pause for me daddy");
         currentToyStrength = 0;
       } else {
-        console.log("Play for me uwu");
         updateLoop();
       }
     });
 
     updateTrack();
-
-    // Spicetify.Player.pause();
-    // Spicetify.Player.play();
+    createInterval();
   } catch (error) {
     console.error(error);
     Spicetify.showNotification("Failed to connect to intiface", true);
@@ -139,16 +163,22 @@ async function handleDisconnection() {
   if (!client || !client.connected)
     return Spicetify.showNotification("You are not connected to intiface");
 
+  if (updateIntervalId) clearInterval(updateIntervalId);
+
   await client.disconnect();
   client = null;
 
   Spicetify.showNotification("Disconnected from intiface");
 }
 
-setInterval(updateLoop, 50);
-
 async function updateLoop() {
-  if (!Spicetify.Player || shouldNotVibrate || !client || !client.devices)
+  if (
+    !Spicetify.Player ||
+    Spicetify.Player.data.isPaused ||
+    shouldNotVibrate ||
+    !client ||
+    !client.devices
+  )
     return;
 
   const trackDuration = Spicetify.Player.getProgress() / 1000;
@@ -175,13 +205,12 @@ async function updateLoop() {
     newToyStrength !== currentToyStrength &&
     Math.abs(currentToyStrength - newToyStrength) > 0.04
   ) {
-    console.log(`${Math.floor(newToyStrength * 100)}%`);
-    currentToyStrength = newToyStrength;
     await vibrateDevices(client?.devices, newToyStrength);
   }
 }
 
 async function updateTrack() {
+  vibrateDevices(client!.devices, 0);
   const track = await Spicetify.getAudioData();
 
   currentTrack = track;
@@ -191,8 +220,11 @@ async function vibrateDevices(
   devices: ButtplugClientDevice[],
   intensity: number
 ) {
+  intensity *= parseInt(settings.getFieldValue("bpio.max-intensity")) / 100;
+
   if (intensity > 1) intensity = 1;
   if (intensity < 0) intensity = 0;
+  currentToyStrength = intensity;
   for (const device of devices) {
     await device.vibrate(intensity);
   }
