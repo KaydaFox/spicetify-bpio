@@ -13,7 +13,7 @@ let connecter: ButtplugBrowserWebsocketClientConnector;
 let client: ButtplugClient | null;
 let currentTrack: SpotifyAudioAnalysis | null = null;
 let currentToyStrength: number = 0;
-let shouldNotVibrate: boolean = true;
+let shouldNotVibrate: boolean = false;
 
 export default async function main() {
   addSettings();
@@ -68,8 +68,6 @@ async function handleConnection(isAutoConnect?: boolean) {
       "You are already connected to intiface, please disconnect first",
       true
     );
-
-  console.log("rawr");
   // if (!settings.getFieldValue("bpio-ws.enable")) return;
   // if (isAutoConnect && !settings.getFieldValue("bpio.autoconnect")) return;
   // I'll return back to those... they seem to break things rn lmaoo
@@ -128,6 +126,9 @@ async function handleConnection(isAutoConnect?: boolean) {
     });
 
     updateTrack();
+
+    // Spicetify.Player.pause();
+    // Spicetify.Player.play();
   } catch (error) {
     console.error(error);
     Spicetify.showNotification("Failed to connect to intiface", true);
