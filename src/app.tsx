@@ -5,17 +5,19 @@ import {
 } from "buttplug";
 import { ButtplugBrowserWebsocketClientConnector } from "buttplug";
 import { SettingsSection } from "spcr-settings";
+import { decibelsToAmplitude, sampleAmplitudeMovingAverage } from "./utils";
 
 const settings = new SettingsSection("Spicetify buttplugio", "bpio-settings");
+
 let connecter: ButtplugBrowserWebsocketClientConnector;
 let client: ButtplugClient | null;
-let currentTrack: trackData | null = null;
+let currentTrack: SpotifyAudioAnalysis | null = null;
 let currentToyStrength: number = 0;
 let shouldNotVibrate: boolean = true;
 
 export default async function main() {
-  console.log("loading...");
   addSettings();
+  await sleep(5000); // We sleep here just to make sure that settings and spicetify were both fully loaded
   handleConnection(true);
 }
 
@@ -87,6 +89,7 @@ async function handleConnection(isAutoConnect?: boolean) {
       );
 
       try {
+        // give the device a little test vibration once it's connected
         await device.vibrate(0.1);
         await new Promise((r) => setTimeout(r, 500));
         await device.stop();
@@ -109,13 +112,13 @@ async function handleConnection(isAutoConnect?: boolean) {
       .connect(connecter)
       .then(() => console.log("Buttplug.io connected"));
 
-    // Spicetify.showNotification("Connected to intiface");
+    Spicetify.showNotification("Connected to intiface");
 
-    Spicetify.Player.addEventListener("songchange", handleVibration);
+    Spicetify.Player.addEventListener("songchange", updateTrack);
     Spicetify.Player.addEventListener("onplaypause", async () => {
       shouldNotVibrate = Spicetify.Player.data.isPaused;
       if (shouldNotVibrate) {
-        // await client?.devices[0].stop();
+        await client?.devices[0].stop();
         console.log("Pause for me daddy");
         currentToyStrength = 0;
       } else {
@@ -124,10 +127,10 @@ async function handleConnection(isAutoConnect?: boolean) {
       }
     });
 
-    handleVibration();
+    updateTrack();
   } catch (error) {
     console.error(error);
-    // Spicetify.showNotification("Failed to connect to intiface", true);
+    Spicetify.showNotification("Failed to connect to intiface", true);
   }
 }
 
@@ -141,53 +144,57 @@ async function handleDisconnection() {
   Spicetify.showNotification("Disconnected from intiface");
 }
 
-setInterval(updateLoop, 100);
+setInterval(updateLoop, 50);
 
 async function updateLoop() {
-  let totalBeatDuration: number = 0;
+  if (!Spicetify.Player || shouldNotVibrate || !client || !client.devices)
+    return;
 
-  if (!Spicetify.Player || shouldNotVibrate) return;
+  const trackDuration = Spicetify.Player.getProgress() / 1000;
 
-  const trackDuration = Spicetify.Player.getProgress();
+  const amplitudeCurve: Point2D[] = currentTrack!.segments.flatMap(
+    (segment) => [
+      { x: segment.start, y: decibelsToAmplitude(segment.loudness_start) },
+      {
+        x: segment.start + segment.loudness_max_time,
+        y: decibelsToAmplitude(segment.loudness_max),
+      },
+    ]
+  );
 
-  for (let i = 0; i < (currentTrack?.beats.length || 0); i++) {
-    const beat = currentTrack?.beats[i];
+  const amplitude = sampleAmplitudeMovingAverage(
+    amplitudeCurve,
+    trackDuration,
+    0.15
+  );
 
-    totalBeatDuration += beat?.duration!;
-    if (totalBeatDuration / 1000 > trackDuration) {
-      let newToyStrength = beat?.confidence!;
-      if (newToyStrength !== currentToyStrength) {
-        currentToyStrength = newToyStrength;
-        // await client?.devices[0].vibrate(beat?.confidence as number);
-        console.log(currentToyStrength);
-      }
-      break;
-    }
+  let newToyStrength = amplitude > 1 ? 1 : amplitude;
+
+  if (
+    newToyStrength !== currentToyStrength &&
+    Math.abs(currentToyStrength - newToyStrength) > 0.04
+  ) {
+    console.log(`${Math.floor(newToyStrength * 100)}%`);
+    currentToyStrength = newToyStrength;
+    await vibrateDevices(client?.devices, newToyStrength);
   }
 }
 
-async function handleVibration() {
+async function updateTrack() {
   const track = await Spicetify.getAudioData();
-  console.log(track);
 
   currentTrack = track;
 }
 
+async function vibrateDevices(
+  devices: ButtplugClientDevice[],
+  intensity: number
+) {
+  if (intensity > 1) intensity = 1;
+  if (intensity < 0) intensity = 0;
+  for (const device of devices) {
+    await device.vibrate(intensity);
+  }
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-interface trackData {
-  beats: trackBeat[];
-  bears: trackBars[];
-}
-
-interface trackBars {
-  start: number;
-  duration: number;
-  confidence: number;
-}
-
-interface trackBeat {
-  start: number;
-  duration: number;
-  confidence: number;
-}
