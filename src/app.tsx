@@ -55,7 +55,7 @@ function addSettings() {
   );
   settings.addInput(
     "bpio.update-interval",
-    "WARNING: changing may cause issues or add high delay (default: 75), value is in milliseconds",
+    "Update interval. WARNING: changing may cause issues or add high delay (default: 75), value is in milliseconds",
     "75",
     () => {
       if (updateIntervalId) {
@@ -70,12 +70,12 @@ function addSettings() {
   settings.addButton(
     "bpio.disconnect",
     "Disconnect from intiface",
-    "disconnect",
+    "Disconnect",
     handleDisconnection
   );
   settings.addButton(
     "bpio.test",
-    "test vibration on all devices",
+    "Test vibration on all devices",
     "test",
     async () => {
       if (!client || !client.connected)
