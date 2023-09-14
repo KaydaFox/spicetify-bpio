@@ -91,6 +91,11 @@ function addSettings() {
       });
     }
   );
+  settings.addToggle(
+    "bpio.debug",
+    "Enable debug logs (uses console.log which outputs to the dev console)",
+    false
+  );
   settings.pushSettings();
 }
 
@@ -159,6 +164,11 @@ async function handleConnection(isAutoConnect?: boolean) {
   }
 }
 
+function doDebugLog(message: any) {
+  if (!settings.getFieldValue("bpio.debug")) return;
+  console.info(message);
+}
+
 async function handleDisconnection() {
   if (!client || !client.connected)
     return Spicetify.showNotification("You are not connected to intiface");
@@ -177,7 +187,7 @@ async function updateLoop() {
     Spicetify.Player.data.isPaused ||
     shouldNotVibrate ||
     !client ||
-    !client.devices
+    !client.connected
   )
     return;
 
@@ -206,6 +216,10 @@ async function updateLoop() {
     Math.abs(currentToyStrength - newToyStrength) > 0.04
   ) {
     await vibrateDevices(client?.devices, newToyStrength);
+  } else {
+    doDebugLog(
+      "Skipping updating device vibration, value is inside the difference"
+    );
   }
 }
 
@@ -221,6 +235,8 @@ async function vibrateDevices(
   intensity: number
 ) {
   intensity *= parseInt(settings.getFieldValue("bpio.max-intensity")) / 100;
+
+  doDebugLog(`Vibration intensity: ${Math.floor(intensity * 100)}%`);
 
   if (intensity > 1) intensity = 1;
   if (intensity < 0) intensity = 0;
