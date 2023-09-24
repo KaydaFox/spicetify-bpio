@@ -15,6 +15,7 @@ let currentTrack: SpotifyAudioAnalysis | null = null;
 let currentToyStrength: number = 0;
 let shouldNotVibrate: boolean = false;
 let updateIntervalId: NodeJS.Timeout | null = null;
+let batteryCheckIntervalId: NodeJS.Timeout | null = null;
 
 export default async function main() {
   addSettings();
@@ -115,7 +116,9 @@ async function handleConnection(isAutoConnect?: boolean) {
       Spicetify.showNotification(
         `Device connected: ${device.name} ${
           device.hasBattery &&
-          `with a battery level of ${(await device.battery()) * 100}%`
+          `with a battery level of ${Math.floor(
+            (await device.battery()) * 100
+          )}%`
         }. Total devices: ${client?.devices.length}`
       );
 
@@ -158,6 +161,7 @@ async function handleConnection(isAutoConnect?: boolean) {
 
     updateTrack();
     createInterval();
+    checkDeviceBattery();
   } catch (error) {
     console.error(error);
     Spicetify.showNotification("Failed to connect to intiface", true);
@@ -246,4 +250,29 @@ async function vibrateDevices(
   }
 }
 
+async function checkDeviceBattery() {
+  if (!client) return;
+  batteryCheckIntervalId = setInterval(async () => {
+    client!.devices.forEach(async (device: ButtplugClientDevice) => {
+      if (device.hasBattery && !device.warnedLowBattery) {
+        const battery = await device.battery();
+        if (battery < 0.83) {
+          device.warnedLowBattery = true;
+          Spicetify.showNotification(
+            `The battery of ${device.name} is low (${Math.floor(
+              battery * 100
+            )}%)`
+          );
+        }
+      }
+    });
+  }, 20000); // 1 minute
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+declare module "buttplug" {
+  interface ButtplugClientDevice {
+    warnedLowBattery: boolean;
+  }
+}
