@@ -256,7 +256,7 @@ async function checkDeviceBattery() {
     client!.devices.forEach(async (device: ButtplugClientDevice) => {
       if (device.hasBattery && !device.warnedLowBattery) {
         const battery = await device.battery();
-        if (battery < 0.83) {
+        if (battery < 0.15) {
           device.warnedLowBattery = true;
           Spicetify.showNotification(
             `The battery of ${device.name} is low (${Math.floor(
@@ -266,7 +266,7 @@ async function checkDeviceBattery() {
         }
       }
     });
-  }, 20000); // 1 minute
+  }, 60000); // 1 minute
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
